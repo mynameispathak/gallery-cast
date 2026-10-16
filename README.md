@@ -63,7 +63,7 @@ Line Tools alone are not sufficient on current SDKs — SwiftUI macro plugins
 ship only with Xcode.
 
 ```bash
-git clone https://github.com/<your-username>/gallery-cast.git
+git clone https://github.com/mynameispathak/gallery-cast.git
 cd gallery-cast
 swift run
 ```
