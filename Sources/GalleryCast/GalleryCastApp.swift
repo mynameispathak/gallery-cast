@@ -9,6 +9,9 @@ struct GalleryCastApp: App {
             ContentView()
                 .environment(model)
                 .frame(minWidth: 900, minHeight: 600)
+                .task {
+                    model.handleLaunchArgumentsIfNeeded()
+                }
         }
         .windowResizability(.contentMinSize)
         .defaultSize(width: 1240, height: 820)

@@ -7,10 +7,15 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 CONFIGURATION="${1:-debug}"
+UNIVERSAL="${2:-}"
 APP="GalleryCast.app"
 
 echo "Building ($CONFIGURATION)..."
-swift build -c "$CONFIGURATION"
+if [ "$UNIVERSAL" = "universal" ]; then
+    swift build -c "$CONFIGURATION" --arch arm64 --arch x86_64
+else
+    swift build -c "$CONFIGURATION"
+fi
 
 BIN=".build/$CONFIGURATION/GalleryCast"
 
@@ -18,6 +23,9 @@ echo "Assembling $APP..."
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/GalleryCast"
+if [ -f assets/AppIcon.icns ]; then
+    cp assets/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
+fi
 
 cat > "$APP/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -42,6 +50,8 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
     <string>14.0</string>
     <key>NSHighResolutionCapable</key>
     <true/>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
     <key>LSApplicationCategoryType</key>
     <string>public.app-category.photography</string>
 </dict>

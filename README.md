@@ -1,84 +1,126 @@
+<div align="center">
+
+<img src="assets/logo.png" width="168" alt="Gallery Cast logo">
+
 # Gallery Cast
 
-A native Mac app for browsing the photos in any folder and playing them
-as a slideshow. Built with SwiftUI; designed to stay out of the photo's way.
+**A fast, native photo viewer for macOS with a built-in slideshow.**
+
+[![Platform](https://img.shields.io/badge/platform-macOS%2014%2B-000000?logo=apple&logoColor=white)](#)
+[![Swift](https://img.shields.io/badge/Swift-6.2-F05138?logo=swift&logoColor=white)](#)
+[![License: MIT](https://img.shields.io/badge/license-MIT-FF9500)](LICENSE)
+[![Release](https://img.shields.io/badge/release-v0.1.0-FF9500?logo=github&logoColor=white)](../../releases)
+
+Browse any folder of photos in a clean, adaptive grid. Open a full-window
+viewer with zoom, pan, and keyboard navigation. Play the folder as a
+slideshow with crossfades and auto-hiding controls — no import, no library,
+no setup.
+
+<p align="center">
+  <a href="../../releases/latest"><strong>Download Gallery Cast</strong></a>&nbsp;&nbsp;·&nbsp;&nbsp;
+  <a href="#build-from-source">Build from Source</a>&nbsp;&nbsp;·&nbsp;&nbsp;
+  <a href="#roadmap">Roadmap</a>
+</p>
+
+![Gallery Cast photo grid](docs/screenshots/grid.png)
+
+</div>
+
+---
 
 ## Features
 
-- **Folder browsing** — pick any folder; its photos appear in a responsive
-  grid (JPEG, PNG, HEIC, HEIF, WebP, GIF, TIFF, BMP, AVIF). The scan is
-  flat (subfolders are not included) and recent folders are remembered.
-- **Viewer** — double-click a photo for a full-window, dark-surface
-  presentation with zoom (pinch, `+`/`-`, double-click), pan, and
-  keyboard navigation.
-- **Slideshow** — plays through the folder in the current grid order
-  (name or date), with a configurable interval (2/5/10/15 s), crossfade
-  transitions, and controls that hide themselves while playing.
-- **Info panel** — EXIF capture data (camera, lens, ISO, aperture,
-  shutter, focal length, taken date) plus file details.
-- **Search & sort** — filter by filename, sort naturally by name or by
-  date; the slideshow always follows the order you see.
+| | |
+|---|---|
+| **Folder browsing** | Point it at any folder — JPEG, PNG, HEIC, WebP, GIF, TIFF, BMP, AVIF. Recent folders stay in the sidebar. |
+| **Clean grid** | Adaptive, retina-crisp thumbnails with hover previews and Finder-like natural sort. |
+| **Full-window viewer** | Dark, distraction-free photo presentation with pinch-zoom, pan, and double-click zoom. |
+| **Slideshow** | 2 / 5 / 10 / 15 second intervals, crossfade transitions, controls that fade away while playing. |
+| **EXIF info panel** | Camera, lens, ISO, aperture, shutter, focal length, taken date, dimensions, file size. |
+| **Search & sort** | Live filename search (case- and diacritic-insensitive), sort by name or date. |
+| **Runs light** | Images decode off the main thread with a modification-aware cache; huge folders stay smooth. |
 
-## Requirements
+## Screenshots
 
-- macOS 14 or later
-- Xcode with Swift 6 (Command Line Tools alone cannot compile SwiftUI on
-  this SDK generation — the SwiftUIMacros plugin ships only with Xcode)
+| Viewer | Viewer + Info Panel |
+|:---:|:---:|
+| ![Viewer](docs/screenshots/viewer.png) | ![Info panel](docs/screenshots/viewer-info.png) |
 
-## Build & run
+## Installation
 
-From the repository root:
+### Download (recommended)
+
+Grab the latest **universal DMG** (Apple Silicon and Intel) from the
+[releases page](../../releases), open it, and drag **Gallery Cast** into
+**Applications**.
+
+[![Download DMG](https://img.shields.io/badge/download-DMG-FF9500?logo=apple&logoColor=white)](../../releases/latest)
+
+### Build from source
+
+Requires [Xcode](https://developer.apple.com/xcode/) (Swift 6.2+). Command
+Line Tools alone are not sufficient on current SDKs — SwiftUI macro plugins
+ship only with Xcode.
 
 ```bash
-swift run                 # debug build, launches immediately
-swift test                # unit tests
-scripts/build-app.sh      # debug .app bundle
-scripts/build-app.sh release   # optimized .app bundle
+git clone https://github.com/<your-username>/gallery-cast.git
+cd gallery-cast
+swift run
 ```
 
-The bundle script produces `GalleryCast.app` — double-click it, or
-`open GalleryCast.app`, for proper Dock/menu-bar behavior. The plain
-binary (`swift run`) also works for development.
+Or build an optimized, installable app bundle:
 
-## Keyboard shortcuts
-
-| Key             | Action                          |
-|-----------------|---------------------------------|
-| `⌘O`            | Open a folder                   |
-| `←` / `→`       | Previous / next photo (viewer)  |
-| `Space`         | Start / pause the slideshow     |
-| `⌘⇧P`           | Play / pause the slideshow      |
-| `+` / `-` / `0` | Zoom in / out / reset           |
-| `I`             | Toggle the info panel           |
-| `F`             | Toggle full screen              |
-| `Esc`           | Reset zoom, then close viewer   |
-
-## Project structure
-
-```
-Sources/GalleryCast/
-├── GalleryCastApp.swift        App entry, menus, shortcuts
-├── Design/DesignTokens.swift   Design system (all values, no literals)
-├── Models/                     Photo + PhotoLibrary (scan, sort, filter)
-├── Services/                   Images, EXIF, slideshow state machine, folder picker
-├── State/AppModel.swift        Single source of truth for UI state
-└── Views/                      Grid, viewer, slideshow chrome, sidebar, panels
-Tests/GalleryCastTests/         Scan/sort/filter and slideshow tests
-scripts/build-app.sh            .app bundle builder
+```bash
+./scripts/build-app.sh release   # → GalleryCast.app
 ```
 
-The UI never touches the file system directly: `AppModel` owns the photo
-list, the viewer tracks photos by identity, and all image decoding
-happens off the main actor with a modification-time-aware cache.
+Run the test suite:
+
+```bash
+swift test
+```
+
+### Open a folder from the terminal
+
+Gallery Cast accepts a folder path (and optionally a photo index) as launch
+arguments — handy for shells and automations:
+
+```bash
+open GalleryCast.app --args ~/Pictures/vacation      # open a folder
+open GalleryCast.app --args ~/Pictures/vacation 4    # …and jump to photo 4
+```
+
+## Keyboard Shortcuts
+
+| Key | Action |
+|---|---|
+| `⌘O` | Open a folder |
+| `←` / `→` | Previous / next photo (viewer) |
+| `Space` | Start / pause the slideshow |
+| `⌘⇧P` | Play / pause the slideshow |
+| `+` / `-` / `0` | Zoom in / out / reset |
+| Double-click | Toggle 2.5× zoom |
+| `I` | Toggle the info panel |
+| `F` | Toggle full screen |
+| `Esc` | Reset zoom, then close the viewer |
+
+## Design
+
+The UI is built on a small token system — spacing, radius, motion, and a
+single amber accent — so the app stays consistent and native-feeling in both
+light and dark mode. The viewer pins itself dark in both appearances so photos,
+not chrome, dominate. Full details live in [DESIGN.md](DESIGN.md).
 
 ## Roadmap
 
-- **Casting to Android TV** — discover Chromecast-enabled devices on the
-  local network via Bonjour (`_googlecast._tcp`) and stream the current
-  slideshow using the Cast V2 protocol. The slideshow already renders from
-  a single ordered photo source, so a cast sink is just one more consumer
-  of that stream. This is the next planned feature.
-- App icon and about panel
-- Recursive folder scanning option
-- RAW format support (DNG, CR3, NEF…)
-- Slideshow transitions (Ken Burns, wipe) and multi-select
+- [x] Folder browsing, viewer, slideshow, EXIF panel
+- [x] Universal binary (Apple Silicon + Intel) DMG releases
+- [ ] **Cast to Android TV / Chromecast** — discover devices over Bonjour on
+      your Wi-Fi and stream the running slideshow via the Cast V2 protocol
+- [ ] RAW format support (DNG, CR3, NEF…)
+- [ ] Optional recursive folder scanning
+- [ ] Slideshow transitions (Ken Burns, wipe)
+
+## License
+
+Gallery Cast is released under the [MIT License](LICENSE).

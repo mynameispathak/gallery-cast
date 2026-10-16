@@ -33,6 +33,11 @@ final class AppModel {
     private var scanGeneration = 0
     private static let recentFoldersKey = "recentFolders"
 
+    /// Viewer index to open once the initial scan finishes (set by
+    /// launch arguments: `GalleryCast /path/to/folder [index] [info]`).
+    private var pendingViewerIndex: Int?
+    private var pendingInfoPanel = false
+
     init() {
         let paths = UserDefaults.standard.stringArray(forKey: Self.recentFoldersKey) ?? []
         recentFolders = paths.map { URL(fileURLWithPath: $0) }
@@ -101,7 +106,41 @@ final class AppModel {
             guard generation == scanGeneration else { return }
             photos = scanned
             isScanning = false
+            openPendingViewerIfPossible()
         }
+    }
+
+    // MARK: Launch arguments
+
+    /// Opens a folder (and optionally the viewer at a photo index) from
+    /// launch arguments: `GalleryCast /path/to/folder [index] [info]`.
+    /// Enables shell and automation workflows, such as:
+    /// `open GalleryCast.app --args ~/Pictures/vacation 4`
+    func handleLaunchArgumentsIfNeeded() {
+        let args = Array(CommandLine.arguments.dropFirst())
+        guard let rawPath = args.first, !rawPath.hasPrefix("-") else { return }
+        let path = (rawPath as NSString).expandingTildeInPath
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory),
+              isDirectory.boolValue
+        else { return }
+
+        if let indexText = args.dropFirst().first,
+           let index = Int(indexText), index >= 0 {
+            pendingViewerIndex = index
+        }
+        pendingInfoPanel = args.dropFirst(2).first?.lowercased() == "info"
+        openFolder(URL(fileURLWithPath: path))
+    }
+
+    private func openPendingViewerIfPossible() {
+        guard let index = pendingViewerIndex else { return }
+        pendingViewerIndex = nil
+        let order = filteredPhotos
+        guard order.indices.contains(index) else { return }
+        openViewer(order[index])
+        showInfoPanel = pendingInfoPanel
+        pendingInfoPanel = false
     }
 
     // MARK: Viewer
