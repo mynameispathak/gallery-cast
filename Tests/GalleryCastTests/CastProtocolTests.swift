@@ -114,6 +114,15 @@ struct CastProtocolTests {
         #expect(CastMessage.decodeFrames(from: &buffer).isEmpty)
     }
 
+    @Test func decodeFramesStopsAtZeroLengthFrame() {
+        // A zero length is corruption, not an empty message: parsing
+        // stops and the desync stays in the buffer, where the caller
+        // is expected to drop the connection.
+        var buffer = Data([0x00, 0x00, 0x00, 0x00, 0x08])
+        #expect(CastMessage.decodeFrames(from: &buffer).isEmpty)
+        #expect(buffer == Data([0x00, 0x00, 0x00, 0x00, 0x08]))
+    }
+
     // MARK: Payload builders
 
     @Test func controlPayloadsAreExact() {
