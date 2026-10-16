@@ -13,8 +13,8 @@
 
 Browse any folder of photos in a clean, adaptive grid. Open a full-window
 viewer with zoom, pan, and keyboard navigation. Play the folder as a
-slideshow with crossfades and auto-hiding controls — no import, no library,
-no setup.
+slideshow with crossfades and auto-hiding controls — or mirror it all to
+a Cast device on your Wi-Fi. No import, no library, no setup.
 
 <p align="center">
   <a href="../../releases/latest"><strong>Download Gallery Cast</strong></a>&nbsp;&nbsp;·&nbsp;&nbsp;
@@ -36,6 +36,7 @@ no setup.
 | **Clean grid** | Adaptive, retina-crisp thumbnails with hover previews and Finder-like natural sort. |
 | **Full-window viewer** | Dark, distraction-free photo presentation with pinch-zoom, pan, and double-click zoom. |
 | **Slideshow** | 2 / 5 / 10 / 15 second intervals, crossfade transitions, controls that fade away while playing. |
+| **Cast** | Mirror the viewer to Cast devices on your Wi-Fi (Chromecast, Android TV) — the TV follows every photo you show. |
 | **EXIF info panel** | Camera, lens, ISO, aperture, shutter, focal length, taken date, dimensions, file size. |
 | **Search & sort** | Live filename search (case- and diacritic-insensitive), sort by name or date. |
 | **Runs light** | Images decode off the main thread with a modification-aware cache; huge folders stay smooth. |
@@ -115,8 +116,9 @@ not chrome, dominate. Full details live in [DESIGN.md](DESIGN.md).
 
 - [x] Folder browsing, viewer, slideshow, EXIF panel
 - [x] Universal binary (Apple Silicon + Intel) DMG releases
-- [ ] **Cast to Android TV / Chromecast** — discover devices over Bonjour on
-      your Wi-Fi and stream the running slideshow via the Cast V2 protocol
+- [x] **Cast to Android TV / Chromecast** — devices discovered over Bonjour
+      on your Wi-Fi; the viewer mirrors, photo by photo, via the CASTV2
+      protocol and a local media server
 - [ ] RAW format support (DNG, CR3, NEF…)
 - [ ] Optional recursive folder scanning
 - [ ] Slideshow transitions (Ken Burns, wipe)

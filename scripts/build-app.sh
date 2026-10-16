@@ -54,6 +54,12 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
     <string>AppIcon</string>
     <key>LSApplicationCategoryType</key>
     <string>public.app-category.photography</string>
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>Gallery Cast finds Cast devices (Android TV, Chromecast) on your Wi-Fi so you can display your photos on them.</string>
+    <key>NSBonjourServices</key>
+    <array>
+        <string>_googlecast._tcp</string>
+    </array>
 </dict>
 </plist>
 PLIST

@@ -36,6 +36,8 @@ struct PhotoGridView: View {
                     Label("Slideshow", systemImage: "play.fill")
                 }
                 .disabled(model.filteredPhotos.isEmpty)
+
+                CastMenu()
             }
         }
         .overlay {

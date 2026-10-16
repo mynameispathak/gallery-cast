@@ -182,6 +182,7 @@ struct ViewerView: View {
             chromeButton("rectangle.stack.fill", isActive: model.showFilmstrip) {
                 model.showFilmstrip.toggle()
             }
+            CastMenu(chromeStyle: true)
             chromeButton("info.circle", isActive: model.showInfoPanel) {
                 model.showInfoPanel.toggle()
             }

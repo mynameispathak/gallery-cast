@@ -24,11 +24,19 @@ final class AppModel {
     var sortOrder: SortOrder = .dateNewest
     var searchQuery = ""
     var selectedPhoto: Photo?
-    private(set) var viewerPhoto: Photo?
+    private(set) var viewerPhoto: Photo? {
+        // The single funnel for every viewer change — open, jump,
+        // navigate, close — so casting always stays in sync with it.
+        didSet { casting.mirror(viewerPhoto) }
+    }
     var showFilmstrip = false
     var showInfoPanel = false
 
     let slideshow = SlideshowController()
+
+    /// Casting: the TV mirrors whatever the viewer shows.
+    let casting = CastSessionController()
+    let castDiscovery = CastDiscoveryService()
 
     private var scanGeneration = 0
     private static let recentFoldersKey = "recentFolders"
@@ -194,6 +202,21 @@ final class AppModel {
         case .playing, .paused:
             slideshow.toggle()
         }
+    }
+
+    // MARK: Casting
+
+    /// Starts mirroring the viewer to a Cast device. Casting needs
+    /// something to mirror, so the viewer opens first if necessary.
+    ///
+    /// `useTLS` is CASTV2's transport in production; tests pass `false`
+    /// to talk to a loopback receiver over plain TCP.
+    func startCasting(_ device: CastDevice, useTLS: Bool = true) {
+        guard let folder = currentFolder, !filteredPhotos.isEmpty else { return }
+        if viewerPhoto == nil {
+            openViewer(selectedPhoto ?? filteredPhotos[0])
+        }
+        casting.start(device: device, folder: folder, currentPhoto: viewerPhoto, useTLS: useTLS)
     }
 
     // MARK: Recents persistence

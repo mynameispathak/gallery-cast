@@ -27,5 +27,8 @@ struct ContentView: View {
         }
         .animation(.easeInOut(duration: Token.Duration.base), value: model.isViewerPresented)
         .tint(Token.Accent.primary)
+        .task {
+            model.castDiscovery.start()
+        }
     }
 }
