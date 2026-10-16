@@ -6,7 +6,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-VERSION="${1:-0.1.0}"
+VERSION="${1:-0.2.0}"
 APP="GalleryCast.app"
 DMG="dist/GalleryCast-v${VERSION}-universal.dmg"
 
