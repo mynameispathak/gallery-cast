@@ -54,6 +54,23 @@ struct ImageProviderTests {
         #expect(await provider.presentation(for: missing, maxPixel: 64) == nil)
     }
 
+    @Test func warmCastDerivativesTurnsPresentationsIntoServedJPEGs() async throws {
+        let folder = makeImageFolder()
+        let photo = try makePhotoFile(in: folder, name: "cast-warm-test.jpg")
+        let provider = ImageProvider()
+
+        // The slideshow already decoded this photo at the cast budget;
+        // warming must turn those pixels into the JPEG the photo server
+        // serves — no second read of the file.
+        _ = try #require(await provider.presentation(for: photo, maxPixel: CastPhotoDerivative.maxPixel))
+        await provider.warmCastDerivatives(for: [photo])
+
+        let jpeg = try #require(CastPhotoDerivative.cached(for: photo))
+        let source = try #require(CGImageSourceCreateWithData(jpeg as CFData, nil))
+        let decoded = try #require(CGImageSourceCreateImageAtIndex(source, 0, nil))
+        #expect(decoded.width > 0 && decoded.height > 0)
+    }
+
     // MARK: Fixtures
 
     private func makeImageFolder() -> URL {

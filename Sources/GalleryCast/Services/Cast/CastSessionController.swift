@@ -260,7 +260,7 @@ final class CastSessionController: @unchecked Sendable {
             namespace: CastNamespace.media,
             payloadJSON: CastPayloads.load(
                 mediaURL: url,
-                contentType: PhotoWebServer.contentType(forExtension: photo.url.pathExtension),
+                contentType: CastPhotoDerivative.contentType,
                 title: photo.displayName,
                 requestID: requestID
             )
@@ -302,8 +302,7 @@ final class CastSessionController: @unchecked Sendable {
 
     /// A receiver that never completes the current phase is not coming.
     /// The message names the phase so the menu can say what stalled.
-    private func armWatchdog(seconds: Double) {
-        watchdog?.cancel()
+    private func armWatchdog(seconds: Double) {        watchdog?.cancel()
         let name = deviceName
         watchdog = Task { [weak self] in
             try? await Task.sleep(for: .seconds(seconds))

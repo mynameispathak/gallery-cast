@@ -1,6 +1,9 @@
+import CoreGraphics
 import Foundation
+import ImageIO
 import Network
 import Testing
+import UniformTypeIdentifiers
 @testable import GalleryCast
 
 /// Full-session flow against a loopback fake receiver: connect,
@@ -49,11 +52,15 @@ struct CastSessionTests {
         )
         #expect(loadMessage.destinationID == "transport-1")
 
-        // …and the URL it names actually serves the photo's bytes.
+        // …and the URL it names actually serves the photo — as a
+        // re-encoded derivative, decoded here back to the fixture's
+        // own dimensions.
         let contentID = try #require(mediaContentID(of: loadMessage.payloadString))
         let (data, response) = try await URLSession.shared.data(from: URL(string: contentID)!)
         #expect((response as? HTTPURLResponse)?.statusCode == 200)
-        #expect(data == payloads["photo-01.jpg"])
+        let source = try #require(CGImageSourceCreateWithData(data as CFData, nil))
+        let decoded = try #require(CGImageSourceCreateImageAtIndex(source, 0, nil))
+        #expect(decoded.width == 64 && decoded.height == 48)
 
         // Navigating in the viewer mirrors to the TV.
         session.mirror(photo(named: "photo-02.jpg", in: folder, payloads: payloads))
@@ -220,16 +227,43 @@ struct CastSessionTests {
         return media["contentId"] as? String
     }
 
+    /// Real (tiny) JPEGs — the cast pipeline re-encodes what it serves,
+    /// so fake bytes would be rejected as undecodable. The first photo
+    /// gets distinct dimensions so a served derivative can be told
+    /// apart from any other image.
     private func temporaryPhotoFolder(names: [String]) throws -> (URL, [String: Data]) {
         let folder = FileManager.default.temporaryDirectory
             .appendingPathComponent("gc-cast-session-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
 
         var payloads: [String: Data] = [:]
-        for name in names {
-            let payload = Data("cast-test-bytes-\(name)".utf8)
-            try payload.write(to: folder.appendingPathComponent(name))
-            payloads[name] = payload
+        for (index, name) in names.enumerated() {
+            let width = index == 0 ? 64 : 48
+            let height = width * 3 / 4
+            let context = try #require(CGContext(
+                data: nil,
+                width: width,
+                height: height,
+                bitsPerComponent: 8,
+                bytesPerRow: 0,
+                space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            ))
+            context.setFillColor(CGColor(
+                red: CGFloat(index) * 0.2, green: 0.5, blue: 0.8, alpha: 1
+            ))
+            context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+            let cgImage = try #require(context.makeImage())
+
+            let url = folder.appendingPathComponent(name)
+            let destination = try #require(
+                CGImageDestinationCreateWithURL(
+                    url as CFURL, UTType.jpeg.identifier as CFString, 1, nil
+                )
+            )
+            CGImageDestinationAddImage(destination, cgImage, nil)
+            #expect(CGImageDestinationFinalize(destination))
+            payloads[name] = try Data(contentsOf: url)
         }
         return (folder, payloads)
     }

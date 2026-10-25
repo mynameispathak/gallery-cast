@@ -259,11 +259,22 @@ struct ViewerView: View {
     /// next slide decodes during the current one's display time. The
     /// task is detached on purpose — the next photo change cancels the
     /// viewer's load task, and the prefetch must survive that.
+    ///
+    /// While casting, the same window also warms cast derivatives —
+    /// the downscaled JPEGs the TV fetches — so its GET lands on a hot
+    /// cache instead of waiting for a decode on the serving queue.
     private func prefetchUpcoming(maxPixel: CGFloat) {
-        let photos = upcomingPhotos(ahead: playing ? 3 : 1)
+        var photos = upcomingPhotos(ahead: playing ? 3 : 1)
+        let casting = model.casting.isActive
+        if casting, let current = model.viewerPhoto {
+            photos.insert(current, at: 0)
+        }
         guard !photos.isEmpty else { return }
         Task.detached(priority: .utility) {
             await ImageProvider.shared.prefetch(photos, maxPixel: maxPixel)
+            if casting {
+                await ImageProvider.shared.warmCastDerivatives(for: photos)
+            }
         }
     }
 

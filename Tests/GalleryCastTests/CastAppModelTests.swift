@@ -62,4 +62,52 @@ struct CastAppModelTests {
         model.closeViewer()
         #expect(model.casting.phase == .idle)
     }
+
+    // MARK: Launch argument parsing
+
+    @Test func launchArgumentsAcceptCastAndPlayInAnyOrder() throws {
+        let folder = try makeTemporaryFolder()
+
+        // `play cast BRAVIA` — the order this regression was found in.
+        let castAfterPlay = AppModel.parseLaunchArguments(
+            [folder.path, "play", "cast", "bravia"]
+        )
+        #expect(castAfterPlay?.castDeviceName == "bravia")
+        #expect(castAfterPlay?.slideshow == true)
+
+        // `cast BRAVIA play` — the previously documented order.
+        let castBeforePlay = AppModel.parseLaunchArguments(
+            [folder.path, "cast", "bravia", "play"]
+        )
+        #expect(castBeforePlay?.castDeviceName == "bravia")
+        #expect(castBeforePlay?.slideshow == true)
+    }
+
+    @Test func launchArgumentsCastWithoutANameAcceptsAnyDevice() throws {
+        let folder = try makeTemporaryFolder()
+        let options = AppModel.parseLaunchArguments([folder.path, "cast"])
+        #expect(options?.castDeviceName == "")
+    }
+
+    @Test func launchArgumentsDoNotMistakeAFlagForACastName() throws {
+        let folder = try makeTemporaryFolder()
+        let options = AppModel.parseLaunchArguments([folder.path, "cast", "play"])
+        #expect(options?.castDeviceName == "")
+        #expect(options?.slideshow == true)
+    }
+
+    @Test func launchArgumentsStillParseIndexAndInfo() throws {
+        let folder = try makeTemporaryFolder()
+        let options = AppModel.parseLaunchArguments([folder.path, "4", "info"])
+        #expect(options?.viewerIndex == 4)
+        #expect(options?.infoPanel == true)
+        #expect(options?.castDeviceName == nil)
+    }
+
+    private func makeTemporaryFolder() throws -> URL {
+        let folder = FileManager.default.temporaryDirectory
+            .appendingPathComponent("gc-appmodel-tests-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        return folder
+    }
 }

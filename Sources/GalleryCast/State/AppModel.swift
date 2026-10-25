@@ -137,41 +137,73 @@ final class AppModel {
     // MARK: Launch arguments
 
     /// Opens a folder from launch arguments, and optionally the viewer,
-    /// the info panel, a slideshow, or a cast session:
-    /// `GalleryCast /path/to/folder [index] [info] [play]` or
-    /// `GalleryCast /path/to/folder cast [deviceName]`. Enables
-    /// shell and automation workflows, such as:
+    /// the info panel, a slideshow, or a cast session. Every token
+    /// after the folder path is an order-free flag:
+    /// `GalleryCast /path/to/folder [index] [info] [play] [cast [deviceName]]`
+    /// Enables shell and automation workflows, such as:
     /// `open GalleryCast.app --args ~/Pictures/vacation 4 play`
+    /// `open GalleryCast.app --args ~/Pictures/vacation play cast BRAVIA`
     func handleLaunchArgumentsIfNeeded() {
-        let args = Array(CommandLine.arguments.dropFirst())
-        guard let rawPath = args.first, !rawPath.hasPrefix("-") else { return }
+        guard let options = Self.parseLaunchArguments(Array(CommandLine.arguments.dropFirst()))
+        else { return }
+        pendingViewerIndex = options.viewerIndex
+        pendingInfoPanel = options.infoPanel
+        pendingSlideshowStart = options.slideshow
+        pendingCastDeviceName = options.castDeviceName
+        openFolder(options.folder)
+    }
+
+    /// Parsed launch arguments: a folder plus optional viewer index,
+    /// flags, and cast target. `castDeviceName` is `nil` when no cast
+    /// was requested and `""` when any discovered device will do.
+    struct LaunchOptions: Equatable {
+        var folder: URL
+        var viewerIndex: Int?
+        var infoPanel = false
+        var slideshow = false
+        var castDeviceName: String?
+    }
+
+    /// The first argument names the folder; everything after it is a
+    /// flag in any order. `cast` may be followed by an optional device
+    /// name, unless the next token is itself a flag — so
+    /// `play cast BRAVIA` and `cast BRAVIA play` mean the same thing.
+    nonisolated static func parseLaunchArguments(_ args: [String]) -> LaunchOptions? {
+        guard let rawPath = args.first, !rawPath.hasPrefix("-") else { return nil }
         let path = (rawPath as NSString).expandingTildeInPath
         var isDirectory: ObjCBool = false
         guard FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory),
               isDirectory.boolValue
-        else { return }
+        else { return nil }
 
+        var options = LaunchOptions(folder: URL(fileURLWithPath: path))
+        let flagTokens: Set<String> = ["cast", "info", "play"]
         let rest = args.dropFirst()
-        if rest.first?.lowercased() == "cast" {
-            pendingCastDeviceName = rest.dropFirst().first ?? ""
-        } else {
-            // The optional index comes first; the tokens after it are
-            // order-free flags.
-            var flags = rest
-            if let indexText = flags.first,
-               let index = Int(indexText), index >= 0 {
-                pendingViewerIndex = index
-                flags = flags.dropFirst()
-            }
-            for flag in flags {
-                switch flag.lowercased() {
-                case "info": pendingInfoPanel = true
-                case "play": pendingSlideshowStart = true
-                default: break
+        var position = rest.startIndex
+        while position < rest.endIndex {
+            let token = rest[position].lowercased()
+            switch token {
+            case "info":
+                options.infoPanel = true
+            case "play":
+                options.slideshow = true
+            case "cast":
+                let next = rest.index(after: position)
+                if next < rest.endIndex, !flagTokens.contains(rest[next].lowercased()) {
+                    options.castDeviceName = rest[next]
+                    position = next
+                } else {
+                    options.castDeviceName = ""
+                }
+            default:
+                // The optional viewer index: the first bare number.
+                if options.viewerIndex == nil, let index = Int(token), index >= 0 {
+                    options.viewerIndex = index
                 }
             }
+            position = rest.index(after: position)
         }
-        openFolder(URL(fileURLWithPath: path))
+        return options
     }
 
     private func openPendingViewerIfPossible() {

@@ -1,6 +1,9 @@
+import CoreGraphics
 import Foundation
+import ImageIO
 import Network
 import Testing
+import UniformTypeIdentifiers
 @testable import GalleryCast
 
 @Suite
@@ -75,31 +78,19 @@ struct CastTransportTests {
 
     @Test func photoURLEscapesEverythingButUnreservedCharacters() {
         let url = PhotoWebServer.url(for: "family trip (1).jpg", host: "192.168.1.5", port: 8096)
-        #expect(url?.absoluteString == "http://192.168.1.5:8096/family%20trip%20%281%29.jpg")
+        #expect(url?.absoluteString == "http://192.168.1.5:8096/cast/family%20trip%20%281%29.jpg")
 
         let plain = PhotoWebServer.url(for: "photo-01.jpg", host: "192.168.1.5", port: 8096)
-        #expect(plain?.absoluteString == "http://192.168.1.5:8096/photo-01.jpg")
-    }
-
-    @Test func contentTypeCoversSupportedPhotoFormats() {
-        #expect(PhotoWebServer.contentType(forExtension: "jpg") == "image/jpeg")
-        #expect(PhotoWebServer.contentType(forExtension: "JPG") == "image/jpeg")
-        #expect(PhotoWebServer.contentType(forExtension: "jpeg") == "image/jpeg")
-        #expect(PhotoWebServer.contentType(forExtension: "png") == "image/png")
-        #expect(PhotoWebServer.contentType(forExtension: "heic") == "image/heic")
-        #expect(PhotoWebServer.contentType(forExtension: "webp") == "image/webp")
-        #expect(PhotoWebServer.contentType(forExtension: "gif") == "image/gif")
-        #expect(PhotoWebServer.contentType(forExtension: "tif") == "image/tiff")
-        #expect(PhotoWebServer.contentType(forExtension: "bmp") == "image/bmp")
-        #expect(PhotoWebServer.contentType(forExtension: "avif") == "image/avif")
-        #expect(PhotoWebServer.contentType(forExtension: "xyz") == "application/octet-stream")
+        #expect(plain?.absoluteString == "http://192.168.1.5:8096/cast/photo-01.jpg")
     }
 
     // MARK: Photo web server
 
     @MainActor
-    @Test func webServerServesPhotoBytesWithCorrectHeaders() async throws {
-        let (folder, payload) = try temporaryPhotoFolder()
+    @Test func webServerServesDownscaledCastDerivative() async throws {
+        let (folder, original) = try temporaryPhotoFolder(
+            name: "photo-01.jpg", width: 4000, height: 2500
+        )
         let server = PhotoWebServer()
         let port = try await server.start(folder: folder)
         defer { server.stop() }
@@ -109,7 +100,14 @@ struct CastTransportTests {
         let http = try #require(response as? HTTPURLResponse)
         #expect(http.statusCode == 200)
         #expect(http.mimeType == "image/jpeg")
-        #expect(data == payload)
+        // A re-encoded derivative, never the original file bytes…
+        #expect(data != original)
+
+        // …and a downscaled one: the long edge obeys the cast budget.
+        let source = try #require(CGImageSourceCreateWithData(data as CFData, nil))
+        let decoded = try #require(CGImageSourceCreateImageAtIndex(source, 0, nil))
+        #expect(max(decoded.width, decoded.height) <= Int(CastPhotoDerivative.maxPixel))
+        #expect(max(decoded.width, decoded.height) < 4000)
     }
 
     @MainActor
@@ -133,7 +131,10 @@ struct CastTransportTests {
         let port = try await server.start(folder: folder)
         defer { server.stop() }
 
-        for path in ["/%2e%2e/secret.jpg", "/sub/photo.jpg", "/.DS_Store"] {
+        for path in [
+            "/cast/../secret.jpg", "/cast/sub/photo.jpg", "/cast/.hidden.jpg",
+            "/%2e%2e/secret.jpg", "/sub/photo.jpg", "/.DS_Store",
+        ] {
             let url = URL(string: "http://127.0.0.1:\(port)\(path)")!
             let (_, response) = try await URLSession.shared.data(from: url)
             let status = (response as? HTTPURLResponse)?.statusCode
@@ -152,6 +153,53 @@ struct CastTransportTests {
         request.httpMethod = "POST"
         let (_, response) = try await URLSession.shared.data(for: request)
         #expect((response as? HTTPURLResponse)?.statusCode == 400)
+    }
+
+    /// The derivative cache keys on the file's mtime: replacing the
+    /// photo regenerates what the server serves.
+    @MainActor
+    @Test func derivativeServesFreshBytesAfterThePhotoChanges() async throws {
+        let (folder, _) = try temporaryPhotoFolder(
+            name: "photo-01.jpg", width: 200, height: 100, color: (0.1, 0.2, 0.3)
+        )
+        let server = PhotoWebServer()
+        let port = try await server.start(folder: folder)
+        defer { server.stop() }
+
+        let url = PhotoWebServer.url(for: "photo-01.jpg", host: "127.0.0.1", port: port)!
+        let (first, _) = try await URLSession.shared.data(from: url)
+
+        // Different pixels, and an mtime delta the second-granularity
+        // cache key can see.
+        try await Task.sleep(for: .seconds(1.2))
+        _ = try makeJPEG(
+            width: 200, height: 100, color: (0.9, 0.8, 0.7), orientation: nil,
+            writingTo: folder.appendingPathComponent("photo-01.jpg")
+        )
+        let (second, _) = try await URLSession.shared.data(from: url)
+        #expect(second != first)
+    }
+
+    /// EXIF orientation is baked into the derivative's pixels, so the
+    /// TV needs no metadata support to show the photo upright.
+    @MainActor
+    @Test func derivativeBakesEXIFOrientationIntoPixels() async throws {
+        let (folder, _) = try temporaryPhotoFolder(
+            name: "photo-01.jpg", width: 800, height: 400, orientation: 6
+        )
+        let server = PhotoWebServer()
+        let port = try await server.start(folder: folder)
+        defer { server.stop() }
+
+        let url = PhotoWebServer.url(for: "photo-01.jpg", host: "127.0.0.1", port: port)!
+        let (data, response) = try await URLSession.shared.data(from: url)
+        #expect((response as? HTTPURLResponse)?.statusCode == 200)
+
+        // Decoding without applying any EXIF transform still yields
+        // the rotated shape: the pixels themselves are portrait.
+        let source = try #require(CGImageSourceCreateWithData(data as CFData, nil))
+        let decoded = try #require(CGImageSourceCreateImageAtIndex(source, 0, nil))
+        #expect(decoded.height > decoded.width)
     }
 
     // MARK: CASTV2 client
@@ -202,13 +250,56 @@ struct CastTransportTests {
 
     // MARK: Helpers
 
-    private func temporaryPhotoFolder() throws -> (URL, Data) {
+    /// A folder holding one real JPEG, so the derivative pipeline has
+    /// actual image bytes to downscale and re-encode.
+    private func temporaryPhotoFolder(
+        name: String = "photo-01.jpg",
+        width: Int = 200,
+        height: Int = 150,
+        color: (CGFloat, CGFloat, CGFloat) = (0.2, 0.4, 0.6),
+        orientation: Int? = nil
+    ) throws -> (URL, Data) {
         let folder = FileManager.default.temporaryDirectory
             .appendingPathComponent("gc-cast-test-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-
-        let payload = Data("jpeg-bytes-\(UUID().uuidString)".utf8)
-        try payload.write(to: folder.appendingPathComponent("photo-01.jpg"))
+        let payload = try makeJPEG(
+            width: width, height: height, color: color, orientation: orientation,
+            writingTo: folder.appendingPathComponent(name)
+        )
         return (folder, payload)
+    }
+
+    private func makeJPEG(
+        width: Int,
+        height: Int,
+        color: (CGFloat, CGFloat, CGFloat),
+        orientation: Int?,
+        writingTo url: URL
+    ) throws -> Data {
+        let context = try #require(CGContext(
+            data: nil,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ))
+        context.setFillColor(CGColor(red: color.0, green: color.1, blue: color.2, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        let cgImage = try #require(context.makeImage())
+
+        let destination = try #require(
+            CGImageDestinationCreateWithURL(
+                url as CFURL, UTType.jpeg.identifier as CFString, 1, nil
+            )
+        )
+        var properties: [CFString: Any] = [:]
+        if let orientation {
+            properties[kCGImagePropertyOrientation] = orientation
+        }
+        CGImageDestinationAddImage(destination, cgImage, properties as CFDictionary)
+        #expect(CGImageDestinationFinalize(destination))
+        return try Data(contentsOf: url)
     }
 }

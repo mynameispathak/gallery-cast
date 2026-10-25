@@ -72,6 +72,33 @@ actor ImageProvider {
         return results
     }
 
+    /// Warms cast derivatives — the downscaled JPEGs the receiver will
+    /// be told to fetch — for the photos the prefetch window already
+    /// decoded, so the TV's GET lands on a hot cache instead of paying a
+    /// decode + encode on the serving queue. Reuses the viewer's
+    /// decoded presentation when it matches the derivative's pixel
+    /// budget (the common case on this screen), else reads the file.
+    func warmCastDerivatives(for photos: [Photo]) {
+        let started = Date()
+        var warmed = 0
+        for photo in photos {
+            // A canceled caller navigated past this window; superseded
+            // work must not pile up on the actor.
+            if Task.isCancelled { break }
+            guard CastPhotoDerivative.cached(for: photo) == nil else { continue }
+            let cgImage = presentations.object(
+                forKey: cacheKey(photo, maxPixel: CastPhotoDerivative.maxPixel)
+            )?.cgImage
+                ?? Self.decode(url: photo.url, maxPixel: CastPhotoDerivative.maxPixel)
+            if let cgImage, let jpeg = CastPhotoDerivative.encode(cgImage) {
+                CastPhotoDerivative.store(jpeg, for: photo)
+                warmed += 1
+            }
+        }
+        let elapsed = Int(Date().timeIntervalSince(started) * 1000)
+        Self.log.info("images: warmed \(warmed) cast derivative(s) in \(elapsed)ms")
+    }
+
     // MARK: Internals
 
     private func image(
@@ -83,7 +110,8 @@ actor ImageProvider {
         // navigated past — so don't let superseded requests pile up on
         // the actor and delay the one decode that matters.
         if Task.isCancelled { return nil }
-        guard let decoded = decode(url: photo.url, maxPixel: maxPixel) else { return nil }
+        guard let cgImage = Self.decode(url: photo.url, maxPixel: maxPixel) else { return nil }
+        let decoded = DecodedImage(cgImage: cgImage)
         cache.setObject(decoded, forKey: key, cost: decoded.bytes)
         return decoded
     }
@@ -94,7 +122,10 @@ actor ImageProvider {
         return "\(photo.url.path)#\(stamp)#\(Int(maxPixel))" as NSString
     }
 
-    private func decode(url: URL, maxPixel: CGFloat) -> DecodedImage? {
+    /// Pure ImageIO downscale-decode: no actor state, so the cast
+    /// derivative pipeline can reuse it from its own queues. EXIF
+    /// orientation is baked into the pixels.
+    nonisolated static func decode(url: URL, maxPixel: CGFloat) -> CGImage? {
         let sourceOptions = [kCGImageSourceShouldCache: false] as CFDictionary
         guard let source = CGImageSourceCreateWithURL(url as CFURL, sourceOptions) else {
             return nil
@@ -106,9 +137,6 @@ actor ImageProvider {
             kCGImageSourceShouldCacheImmediately: true,
             kCGImageSourceThumbnailMaxPixelSize: max(1, maxPixel),
         ] as CFDictionary
-        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, thumbOptions) else {
-            return nil
-        }
-        return DecodedImage(cgImage: cgImage)
+        return CGImageSourceCreateThumbnailAtIndex(source, 0, thumbOptions)
     }
 }

@@ -1,10 +1,13 @@
 import Foundation
 import Network
+import os
 
-/// Serves the open folder's photos over plain HTTP so a Cast receiver on
-/// the LAN can fetch them. GET only, one request per connection, no
-/// listing, no traversal; refuses anything that is not a direct child of
-/// the served folder. Runs only while a cast session is live.
+/// Serves the open folder's photos over plain HTTP as downscaled JPEG
+/// derivatives, so a Cast receiver on the LAN fetches a few hundred
+/// kilobytes instead of a multi-megabyte original. GET only, one
+/// request per connection, no listing, no traversal; refuses anything
+/// that is not a direct child of the served folder. Runs only while a
+/// cast session is live.
 ///
 /// The served folder is fixed for the lifetime of the server (switching
 /// folders means a new server), so connection handlers capture an
@@ -80,22 +83,8 @@ final class PhotoWebServer {
             CharacterSet(charactersIn: "-._~")
         )
         components.percentEncodedPath =
-            "/" + (filename.addingPercentEncoding(withAllowedCharacters: allowed) ?? filename)
+            castRoute + "/" + (filename.addingPercentEncoding(withAllowedCharacters: allowed) ?? filename)
         return components.url
-    }
-
-    nonisolated static func contentType(forExtension fileExtension: String) -> String {
-        switch fileExtension.lowercased() {
-        case "jpg", "jpeg": return "image/jpeg"
-        case "png": return "image/png"
-        case "heic", "heif": return "image/heic"
-        case "webp": return "image/webp"
-        case "gif": return "image/gif"
-        case "tif", "tiff": return "image/tiff"
-        case "bmp": return "image/bmp"
-        case "avif": return "image/avif"
-        default: return "application/octet-stream"
-        }
     }
 }
 
@@ -168,8 +157,13 @@ private struct ServeContext: Sendable {
             return PhotoWebServerResponse.badRequest
         }
 
-        let name = String(path.dropFirst()).removingPercentEncoding
-            ?? String(path.dropFirst())
+        // The derivative route is the only route: the receiver fetches
+        // exactly the URLs the LOAD messages name, and those all point
+        // at downscaled JPEGs.
+        let prefix = castRoute + "/"
+        guard path.hasPrefix(prefix) else { return PhotoWebServerResponse.notFound }
+        let encoded = path.dropFirst(prefix.count)
+        let name = encoded.removingPercentEncoding ?? String(encoded)
         guard !name.isEmpty, !name.hasPrefix("."),
               !name.contains("/"), !name.contains("\\"), !name.contains("..")
         else {
@@ -179,14 +173,25 @@ private struct ServeContext: Sendable {
         let fileURL = folder.appendingPathComponent(name)
         var isDirectory: ObjCBool = false
         guard FileManager.default.fileExists(atPath: fileURL.path, isDirectory: &isDirectory),
-              !isDirectory.boolValue,
-              let data = try? Data(contentsOf: fileURL)
+              !isDirectory.boolValue
         else {
             return PhotoWebServerResponse.notFound
         }
 
-        let contentType = PhotoWebServer.contentType(forExtension: fileURL.pathExtension)
-        return PhotoWebServerResponse.ok(contentType: contentType, body: data)
+        // The derivative is keyed by the file's mtime, so an edited
+        // photo is regenerated on its next fetch.
+        let started = Date()
+        let attributes = try? FileManager.default.attributesOfItem(atPath: fileURL.path)
+        guard let modified = attributes?[.modificationDate] as? Date,
+              let jpeg = CastPhotoDerivative.jpeg(for: fileURL, modified: modified)
+        else {
+            return PhotoWebServerResponse.notFound
+        }
+        let elapsed = Int(Date().timeIntervalSince(started) * 1000)
+        photoServeLog.info(
+            "cast: served \(name, privacy: .public) (\(jpeg.count / 1024)KB derivative) in \(elapsed)ms"
+        )
+        return PhotoWebServerResponse.ok(contentType: CastPhotoDerivative.contentType, body: jpeg)
     }
 }
 
@@ -217,7 +222,13 @@ private enum PhotoWebServerResponse {
 
 // MARK: - Constants
 
+/// The only route: URLs the LOAD messages name all point at
+/// `/cast/<filename>`, resolved against the served folder.
+private let castRoute = "/cast"
+
 private let photoServeQueue = DispatchQueue(label: "gallerycast.photo-server")
+
+private let photoServeLog = Logger(subsystem: "com.aniketpathak.gallerycast", category: "cast")
 
 /// Request headers are a few dozen bytes; far more means abuse.
 private let photoMaxRequestBytes = 16 * 1024
