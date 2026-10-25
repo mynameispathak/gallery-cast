@@ -1,6 +1,7 @@
 import CoreGraphics
 import Foundation
 import ImageIO
+import os
 
 /// A decoded image, safe to hop across concurrency domains:
 /// CGImage is immutable and the wrapper is never mutated after creation.
@@ -10,6 +11,9 @@ final class DecodedImage: @unchecked Sendable {
     init(cgImage: CGImage) {
         self.cgImage = cgImage
     }
+
+    /// Rough memory footprint, used as the cache's cost value.
+    var bytes: Int { cgImage.bytesPerRow * cgImage.height }
 }
 
 /// Loads and caches images off the main actor.
@@ -17,8 +21,14 @@ final class DecodedImage: @unchecked Sendable {
 /// - Grid thumbnails: small, aggressively cached, 2x pixel density.
 /// - Viewer images: decoded at screen-appropriate size so a huge
 ///   source file never consumes more memory than the display needs.
+///
+/// `prefetch(_:)` decodes a bounded batch ahead of the viewer, so a
+/// slideshow's load at slide time is a cache hit rather than a cold
+/// read from (possibly slow) storage.
 actor ImageProvider {
     static let shared = ImageProvider()
+
+    private static let log = Logger(subsystem: "com.aniketpathak.gallerycast", category: "images")
 
     private let thumbnails = NSCache<NSString, DecodedImage>()
     private let presentations = NSCache<NSString, DecodedImage>()
@@ -26,15 +36,40 @@ actor ImageProvider {
     init() {
         thumbnails.countLimit = 2_500
         presentations.countLimit = 24
+        // A decoded presentation is screen-sized RGBA — tens of MB. The
+        // count limit alone could hold ~600 MB, which invites the system
+        // to evict everything under memory pressure; a byte budget
+        // keeps the working set bounded on its own.
+        presentations.totalCostLimit = 256 * 1_024 * 1_024
     }
 
     func thumbnail(for photo: Photo, side: CGFloat) -> DecodedImage? {
-        // 2x pixel density keeps grid cells crisp on retina displays.
         image(for: photo, cache: thumbnails, maxPixel: side * 2)
     }
 
     func presentation(for photo: Photo, maxPixel: CGFloat) -> DecodedImage? {
-        image(for: photo, cache: presentations, maxPixel: maxPixel)
+        let started = Date()
+        let decoded = image(for: photo, cache: presentations, maxPixel: maxPixel)
+        let elapsed = Int(Date().timeIntervalSince(started) * 1000)
+        if let decoded {
+            Self.log.info(
+                "images: viewer loaded \(photo.filename, privacy: .public) (\(decoded.cgImage.width)x\(decoded.cgImage.height)) in \(elapsed)ms"
+            )
+        } else {
+            Self.log.error("images: viewer failed to load \(photo.filename, privacy: .public)")
+        }
+        return decoded
+    }
+
+    /// Decodes a batch for the slides (or arrow steps) that follow, so
+    /// navigation lands on a warm cache. Duplicate photos collapse via
+    /// the cache, and an entry whose caller was canceled is skipped.
+    func prefetch(_ photos: [Photo], maxPixel: CGFloat) -> [DecodedImage?] {
+        let started = Date()
+        let results = photos.map { image(for: $0, cache: presentations, maxPixel: maxPixel) }
+        let elapsed = Int(Date().timeIntervalSince(started) * 1000)
+        Self.log.info("images: prefetched \(photos.count) photo(s) in \(elapsed)ms")
+        return results
     }
 
     // MARK: Internals
@@ -44,8 +79,12 @@ actor ImageProvider {
     ) -> DecodedImage? {
         let key = cacheKey(photo, maxPixel: maxPixel)
         if let hit = cache.object(forKey: key) { return hit }
+        // A canceled caller no longer wants this decode — its photo was
+        // navigated past — so don't let superseded requests pile up on
+        // the actor and delay the one decode that matters.
+        if Task.isCancelled { return nil }
         guard let decoded = decode(url: photo.url, maxPixel: maxPixel) else { return nil }
-        cache.setObject(decoded, forKey: key)
+        cache.setObject(decoded, forKey: key, cost: decoded.bytes)
         return decoded
     }
 

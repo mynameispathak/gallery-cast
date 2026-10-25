@@ -250,6 +250,26 @@ struct ViewerView: View {
         guard let photo = model.viewerPhoto else { return }
         let maxPixel = screenLongestSide * 2
         image = await ImageProvider.shared.presentation(for: photo, maxPixel: maxPixel)
+        prefetchUpcoming(maxPixel: maxPixel)
+    }
+
+    /// Warms the cache for whatever follows the current photo, so the
+    /// load at navigation time is a cache hit instead of a cold read
+    /// from disk. While a slideshow plays, this is the pipeline: the
+    /// next slide decodes during the current one's display time. The
+    /// task is detached on purpose — the next photo change cancels the
+    /// viewer's load task, and the prefetch must survive that.
+    private func prefetchUpcoming(maxPixel: CGFloat) {
+        let photos = upcomingPhotos(ahead: playing ? 3 : 1)
+        guard !photos.isEmpty else { return }
+        Task.detached(priority: .utility) {
+            await ImageProvider.shared.prefetch(photos, maxPixel: maxPixel)
+        }
+    }
+
+    private func upcomingPhotos(ahead: Int) -> [Photo] {
+        guard ahead > 0, let index = model.viewerIndex, !order.isEmpty else { return [] }
+        return (1...ahead).map { order[(index + $0) % order.count] }
     }
 
     private var screenLongestSide: CGFloat {

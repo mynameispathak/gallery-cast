@@ -43,9 +43,13 @@ final class AppModel {
     private static let recentFoldersKey = "recentFolders"
 
     /// Viewer index to open once the initial scan finishes (set by
-    /// launch arguments: `GalleryCast /path/to/folder [index] [info]`).
+    /// launch arguments: `GalleryCast /path/to/folder [index] [flags]`).
     private var pendingViewerIndex: Int?
     private var pendingInfoPanel = false
+
+    /// Start the slideshow once the scan delivers photos to show
+    /// (launch-argument flag: `GalleryCast /path/to/folder [play]`).
+    private var pendingSlideshowStart = false
 
     /// Cast target requested by launch arguments
     /// (`GalleryCast /path/to/folder cast [deviceName]`): `nil` means
@@ -132,11 +136,12 @@ final class AppModel {
 
     // MARK: Launch arguments
 
-    /// Opens a folder from launch arguments, and optionally the viewer
-    /// or a cast session: `GalleryCast /path/to/folder [index] [info]`
-    /// or `GalleryCast /path/to/folder cast [deviceName]`. Enables
+    /// Opens a folder from launch arguments, and optionally the viewer,
+    /// the info panel, a slideshow, or a cast session:
+    /// `GalleryCast /path/to/folder [index] [info] [play]` or
+    /// `GalleryCast /path/to/folder cast [deviceName]`. Enables
     /// shell and automation workflows, such as:
-    /// `open GalleryCast.app --args ~/Pictures/vacation 4`
+    /// `open GalleryCast.app --args ~/Pictures/vacation 4 play`
     func handleLaunchArgumentsIfNeeded() {
         let args = Array(CommandLine.arguments.dropFirst())
         guard let rawPath = args.first, !rawPath.hasPrefix("-") else { return }
@@ -150,23 +155,49 @@ final class AppModel {
         if rest.first?.lowercased() == "cast" {
             pendingCastDeviceName = rest.dropFirst().first ?? ""
         } else {
-            if let indexText = rest.first,
+            // The optional index comes first; the tokens after it are
+            // order-free flags.
+            var flags = rest
+            if let indexText = flags.first,
                let index = Int(indexText), index >= 0 {
                 pendingViewerIndex = index
+                flags = flags.dropFirst()
             }
-            pendingInfoPanel = rest.dropFirst().first?.lowercased() == "info"
+            for flag in flags {
+                switch flag.lowercased() {
+                case "info": pendingInfoPanel = true
+                case "play": pendingSlideshowStart = true
+                default: break
+                }
+            }
         }
         openFolder(URL(fileURLWithPath: path))
     }
 
     private func openPendingViewerIfPossible() {
-        guard let index = pendingViewerIndex else { return }
+        let index = pendingViewerIndex
         pendingViewerIndex = nil
+        guard index != nil || pendingSlideshowStart else { return }
+
         let order = filteredPhotos
-        guard order.indices.contains(index) else { return }
-        openViewer(order[index])
+        let start: Photo?
+        if let index, order.indices.contains(index) {
+            start = order[index]
+        } else if pendingSlideshowStart {
+            start = selectedPhoto ?? order.first
+        } else {
+            start = nil
+        }
+        guard let start else { return }
+
+        openViewer(start)
         showInfoPanel = pendingInfoPanel
         pendingInfoPanel = false
+
+        if pendingSlideshowStart {
+            pendingSlideshowStart = false
+            startSlideshow()
+        }
     }
 
     /// Starts the cast requested by launch arguments once the scan has

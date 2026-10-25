@@ -89,8 +89,10 @@ Gallery Cast accepts a folder path (and optionally a photo index, or a
 ```bash
 open GalleryCast.app --args ~/Pictures/vacation      # open a folder
 open GalleryCast.app --args ~/Pictures/vacation 4    # …and jump to photo 4
+open GalleryCast.app --args ~/Pictures/vacation play         # …and start a slideshow
+open GalleryCast.app --args ~/Pictures/vacation 4 play info  # …with the info panel on
 open GalleryCast.app --args ~/Pictures/vacation cast          # …and cast to the first device found
-open GalleryCast.app --args ~/Pictures/vacation cast BRAVIA    # …and cast to a device matching "BRAVIA"
+open GalleryCast.app --args ~/Pictures/vacation cast BRAVIA   # …and cast to a device matching "BRAVIA"
 ```
 
 ## Keyboard Shortcuts
