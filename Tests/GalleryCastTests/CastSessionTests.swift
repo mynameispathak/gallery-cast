@@ -117,6 +117,69 @@ struct CastSessionTests {
         #expect(session.phase == .idle)
     }
 
+    @Test func sessionFailsFastWhenTheReceiverAcceptsButNeverAnswers() async throws {
+        let (folder, payloads) = try temporaryPhotoFolder(names: ["photo-01.jpg"])
+        let fake = FakeCastReceiver()
+        try fake.start()
+        defer { fake.stop() }
+
+        let session = CastSessionController()
+        session.connectTimeout = 0.5
+        session.launchTimeout = 0.5
+        session.start(
+            device: testDevice(port: fake.port),
+            folder: folder,
+            currentPhoto: photo(named: "photo-01.jpg", in: folder, payloads: payloads),
+            useTLS: false
+        )
+
+        // The socket is accepted but GET_STATUS is never answered.
+        let failed = await waitUntil(timeout: 5) {
+            session.phase == .idle && session.lastError != nil
+        }
+        #expect(failed)
+        #expect(session.lastError == "Test TV is not responding. Is it turned on?")
+    }
+
+    @Test func sessionFailsWhenTheMediaAppNeverComesUp() async throws {
+        let (folder, payloads) = try temporaryPhotoFolder(names: ["photo-01.jpg"])
+        let fake = FakeCastReceiver()
+        try fake.start()
+        defer { fake.stop() }
+
+        let session = CastSessionController()
+        session.launchTimeout = 0.5
+        session.start(
+            device: testDevice(port: fake.port),
+            folder: folder,
+            currentPhoto: photo(named: "photo-01.jpg", in: folder, payloads: payloads),
+            useTLS: false
+        )
+
+        let sawStatusRequest = await waitUntil {
+            fake.received().contains { $0.namespace == CastNamespace.receiver }
+        }
+        #expect(sawStatusRequest)
+
+        // Idle receiver: the session launches the media app…
+        fake.send(receiverStatus(appRunning: false))
+        let sawLaunch = await waitUntil {
+            fake.received().contains {
+                $0.namespace == CastNamespace.receiver
+                    && CastPayloads.messageType(of: $0.payloadString ?? "") == "LAUNCH"
+            }
+        }
+        #expect(sawLaunch)
+        #expect(session.phase == .launching)
+
+        // …but the app never appears, so the watchdog ends the wait.
+        let failed = await waitUntil(timeout: 5) {
+            session.phase == .idle && session.lastError != nil
+        }
+        #expect(failed)
+        #expect(session.lastError == "Test TV took too long to start the media app.")
+    }
+
     // MARK: Fixtures
 
     private func testDevice(port: UInt16) -> CastDevice {

@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import os
 
 /// Drives one cast session: connect to the device, bring up the Default
 /// Media Receiver, then mirror the viewer — every current-photo change
@@ -39,6 +40,7 @@ final class CastSessionController: @unchecked Sendable {
 
     private static let senderID = "sender-0"
     private static let receiverID = "receiver-0"
+    private static let log = Logger(subsystem: "com.aniketpathak.gallerycast", category: "cast")
 
     // MARK: Session lifecycle
 
@@ -51,6 +53,7 @@ final class CastSessionController: @unchecked Sendable {
         hasLaunched = false
         pendingPhoto = currentPhoto
         phase = .connecting
+        Self.log.info("cast: session to \(device.name, privacy: .public) starting")
 
         // Wire the handlers before any awaiting so captures stay
         // consistent and no state can race the first callback.
@@ -66,14 +69,15 @@ final class CastSessionController: @unchecked Sendable {
 
         Task {
             do {
-                try await server.start(folder: folder)
+                let port = try await server.start(folder: folder)
+                Self.log.info("cast: photo server bound on port \(port)")
                 client.start()
             } catch {
                 self.fail(with: error.localizedDescription)
             }
         }
 
-        armWatchdog()
+        armWatchdog(seconds: connectTimeout)
     }
 
     /// The viewer moved — or closed. `nil` stops the session, matching
@@ -91,6 +95,9 @@ final class CastSessionController: @unchecked Sendable {
     }
 
     func stop() {
+        if isActive {
+            Self.log.info("cast: stopping session")
+        }
         watchdog?.cancel()
         watchdog = nil
 
@@ -142,6 +149,9 @@ final class CastSessionController: @unchecked Sendable {
                 interfaces: LocalAddress.interfaces(),
                 deviceIPv4: remoteIPv4 ?? ""
             )
+            Self.log.info(
+                "cast: connected (remote \(remoteIPv4 ?? "non-IPv4", privacy: .public), serving from \(self.lanAddress ?? "none", privacy: .public))"
+            )
             client?.send(CastMessage(
                 sourceID: Self.senderID,
                 destinationID: Self.receiverID,
@@ -155,7 +165,12 @@ final class CastSessionController: @unchecked Sendable {
                 namespace: CastNamespace.receiver,
                 payloadJSON: CastPayloads.getStatus(requestID: requestID)
             ))
+            // The socket is up; the remaining budget covers the
+            // receiver's handshake and app launch, which is the slow
+            // part on real TVs.
+            armWatchdog(seconds: launchTimeout)
         case .failed(let message):
+            Self.log.error("cast: connection failed: \(message, privacy: .public)")
             fail(with: message)
         case .cancelled:
             break
@@ -173,8 +188,12 @@ final class CastSessionController: @unchecked Sendable {
             handleReceiverStatus(status)
 
         case CastNamespace.media:
-            if CastPayloads.messageType(of: message.payloadString ?? "") == "LOAD_FAILED" {
+            let type = CastPayloads.messageType(of: message.payloadString ?? "")
+            if type == "LOAD_FAILED" {
+                Self.log.error("cast: receiver could not display the photo (LOAD_FAILED)")
                 lastError = "The receiver could not display this photo."
+            } else if type == "MEDIA_STATUS" {
+                Self.log.info("cast: receiver acknowledged media (MEDIA_STATUS)")
             }
 
         default:
@@ -190,6 +209,7 @@ final class CastSessionController: @unchecked Sendable {
             if !hasLaunched {
                 hasLaunched = true
                 phase = .launching
+                Self.log.info("cast: receiver idle, launching media app")
                 requestID += 1
                 client?.send(CastMessage(
                     sourceID: Self.senderID,
@@ -212,6 +232,7 @@ final class CastSessionController: @unchecked Sendable {
         // then take over the screen with the current photo.
         if connectedTransportID != transportID {
             connectedTransportID = transportID
+            Self.log.info("cast: media app ready (session \(app.sessionID ?? "unknown", privacy: .public)), opening transport channel")
             client?.send(CastMessage(
                 sourceID: Self.senderID,
                 destinationID: transportID,
@@ -231,6 +252,7 @@ final class CastSessionController: @unchecked Sendable {
               let transportID = connectedTransportID,
               let url = server.url(for: photo, host: lanAddress)
         else { return }
+        Self.log.info("cast: loading \(photo.displayName, privacy: .public) from \(url, privacy: .public)")
         requestID += 1
         client?.send(CastMessage(
             sourceID: Self.senderID,
@@ -249,6 +271,7 @@ final class CastSessionController: @unchecked Sendable {
 
     private func fail(with message: String) {
         guard isActive else { return }
+        Self.log.error("cast: session failed: \(message, privacy: .public)")
         lastError = message
         watchdog?.cancel()
         watchdog = nil
@@ -264,15 +287,34 @@ final class CastSessionController: @unchecked Sendable {
         phase = .idle
     }
 
-    /// A receiver that never completes the handshake is not coming.
-    private func armWatchdog(seconds: Double = 12) {
+    /// Connection budget: a healthy Cast device on the LAN finishes
+    /// TCP + TLS in well under a second (measured 0.04 s on a real TV),
+    /// so this mostly catches advertised-but-dead services — such as a
+    /// mirroring app on the TV that publishes `_googlecast._tcp`
+    /// without answering CASTV2 connections. Sized to let the client's
+    /// three retry attempts complete before it fires.
+    var connectTimeout: Double = 6.5
+
+    /// Launch budget: GET_STATUS + LAUNCH + the Default Media Receiver
+    /// coming up. Measured ~7 s warm on a real TV, slower cold, so this
+    /// is deliberately generous.
+    var launchTimeout: Double = 20
+
+    /// A receiver that never completes the current phase is not coming.
+    /// The message names the phase so the menu can say what stalled.
+    private func armWatchdog(seconds: Double) {
         watchdog?.cancel()
         let name = deviceName
         watchdog = Task { [weak self] in
             try? await Task.sleep(for: .seconds(seconds))
             guard !Task.isCancelled, let self else { return }
-            if self.phase == .connecting || self.phase == .launching {
-                self.fail(with: "Timed out talking to \(name ?? "the device").")
+            switch self.phase {
+            case .connecting:
+                self.fail(with: "\(name ?? "The device") is not responding. Is it turned on?")
+            case .launching:
+                self.fail(with: "\(name ?? "The device") took too long to start the media app.")
+            default:
+                break
             }
         }
     }

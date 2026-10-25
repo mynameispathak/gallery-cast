@@ -83,12 +83,14 @@ swift test
 
 ### Open a folder from the terminal
 
-Gallery Cast accepts a folder path (and optionally a photo index) as launch
-arguments — handy for shells and automations:
+Gallery Cast accepts a folder path (and optionally a photo index, or a
+`cast` target) as launch arguments — handy for shells and automations:
 
 ```bash
 open GalleryCast.app --args ~/Pictures/vacation      # open a folder
 open GalleryCast.app --args ~/Pictures/vacation 4    # …and jump to photo 4
+open GalleryCast.app --args ~/Pictures/vacation cast          # …and cast to the first device found
+open GalleryCast.app --args ~/Pictures/vacation cast BRAVIA    # …and cast to a device matching "BRAVIA"
 ```
 
 ## Keyboard Shortcuts

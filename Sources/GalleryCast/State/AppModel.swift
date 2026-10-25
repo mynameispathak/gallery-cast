@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import os
 
 /// The app's single source of truth.
 ///
@@ -46,6 +47,15 @@ final class AppModel {
     private var pendingViewerIndex: Int?
     private var pendingInfoPanel = false
 
+    /// Cast target requested by launch arguments
+    /// (`GalleryCast /path/to/folder cast [deviceName]`): `nil` means
+    /// none, `""` means any discovered device, otherwise a
+    /// case-insensitive substring of the device's Bonjour name.
+    private var pendingCastDeviceName: String?
+    private var castPickTask: Task<Void, Never>?
+
+    private static let log = Logger(subsystem: "com.aniketpathak.gallerycast", category: "app")
+
     init() {
         let paths = UserDefaults.standard.stringArray(forKey: Self.recentFoldersKey) ?? []
         recentFolders = paths.map { URL(fileURLWithPath: $0) }
@@ -89,6 +99,7 @@ final class AppModel {
     }
 
     func openFolder(_ url: URL) {
+        castPickTask?.cancel()
         currentFolder = url
         selectedPhoto = nil
         closeViewer()
@@ -115,14 +126,16 @@ final class AppModel {
             photos = scanned
             isScanning = false
             openPendingViewerIfPossible()
+            startPendingCastIfPossible()
         }
     }
 
     // MARK: Launch arguments
 
-    /// Opens a folder (and optionally the viewer at a photo index) from
-    /// launch arguments: `GalleryCast /path/to/folder [index] [info]`.
-    /// Enables shell and automation workflows, such as:
+    /// Opens a folder from launch arguments, and optionally the viewer
+    /// or a cast session: `GalleryCast /path/to/folder [index] [info]`
+    /// or `GalleryCast /path/to/folder cast [deviceName]`. Enables
+    /// shell and automation workflows, such as:
     /// `open GalleryCast.app --args ~/Pictures/vacation 4`
     func handleLaunchArgumentsIfNeeded() {
         let args = Array(CommandLine.arguments.dropFirst())
@@ -133,11 +146,16 @@ final class AppModel {
               isDirectory.boolValue
         else { return }
 
-        if let indexText = args.dropFirst().first,
-           let index = Int(indexText), index >= 0 {
-            pendingViewerIndex = index
+        let rest = args.dropFirst()
+        if rest.first?.lowercased() == "cast" {
+            pendingCastDeviceName = rest.dropFirst().first ?? ""
+        } else {
+            if let indexText = rest.first,
+               let index = Int(indexText), index >= 0 {
+                pendingViewerIndex = index
+            }
+            pendingInfoPanel = rest.dropFirst().first?.lowercased() == "info"
         }
-        pendingInfoPanel = args.dropFirst(2).first?.lowercased() == "info"
         openFolder(URL(fileURLWithPath: path))
     }
 
@@ -149,6 +167,40 @@ final class AppModel {
         openViewer(order[index])
         showInfoPanel = pendingInfoPanel
         pendingInfoPanel = false
+    }
+
+    /// Starts the cast requested by launch arguments once the scan has
+    /// photos to mirror. Waits up to 10 s for discovery to surface a
+    /// matching device; falls back to just opening the viewer.
+    private func startPendingCastIfPossible() {
+        guard let wanted = pendingCastDeviceName else { return }
+        pendingCastDeviceName = nil
+        castDiscovery.start()
+        castPickTask?.cancel()
+        castPickTask = Task {
+            let deadline = Date().addingTimeInterval(10)
+            while Date() < deadline {
+                if Task.isCancelled { return }
+                if let device = pendingCastMatch(named: wanted, in: castDiscovery.devices) {
+                    Self.log.info("app: launch-arg cast matched \(device.name, privacy: .public)")
+                    startCasting(device)
+                    return
+                }
+                try? await Task.sleep(for: .milliseconds(500))
+            }
+            guard !Task.isCancelled else { return }
+            Self.log.error("app: launch-arg cast found no matching device")
+            if viewerPhoto == nil, !filteredPhotos.isEmpty {
+                openViewer(selectedPhoto ?? filteredPhotos[0])
+            }
+        }
+    }
+
+    /// `""` accepts any device; otherwise a case-insensitive substring
+    /// of the Bonjour name ("BRAVIA" matches "BRAVIA-VU2-cc…").
+    private func pendingCastMatch(named wanted: String, in devices: [CastDevice]) -> CastDevice? {
+        if wanted.isEmpty { return devices.first }
+        return devices.first { $0.name.localizedCaseInsensitiveContains(wanted) }
     }
 
     // MARK: Viewer
