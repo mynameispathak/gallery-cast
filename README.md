@@ -9,7 +9,7 @@
 [![Platform](https://img.shields.io/badge/platform-macOS%2014%2B-000000?logo=apple&logoColor=white)](#)
 [![Swift](https://img.shields.io/badge/Swift-6.2-F05138?logo=swift&logoColor=white)](#)
 [![License: MIT](https://img.shields.io/badge/license-MIT-FF9500)](LICENSE)
-[![Release](https://img.shields.io/badge/release-v0.2.0-FF9500?logo=github&logoColor=white)](../../releases)
+[![Release](https://img.shields.io/badge/release-v0.2.1-FF9500?logo=github&logoColor=white)](../../releases)
 
 Browse any folder of photos in a clean, adaptive grid. Open a full-window
 viewer with zoom, pan, and keyboard navigation. Play the folder as a
